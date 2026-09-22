@@ -1,5 +1,6 @@
 import os
 import sqlite3
+import threading
 from dotenv import load_dotenv
 from telegram import Update, ReplyKeyboardMarkup
 from telegram.ext import (
@@ -18,6 +19,29 @@ if not TOKEN:
     raise ValueError("BOT_TOKEN nahi mila. .env file check karein.")
 
 DB_FILE = "bot.db"
+
+
+# =========================
+# KEEP-ALIVE SERVER (for Render free Web Service)
+# =========================
+# Render's free plan only works for services that listen on a port.
+# This tiny server exists only to satisfy that requirement so the
+# bot (which itself uses polling, not a web server) can run for free.
+
+def run_keepalive_server():
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b"Bot is running")
+
+        def log_message(self, format, *args):
+            pass
+
+    port = int(os.environ.get("PORT", 10000))
+    HTTPServer(("0.0.0.0", port), Handler).serve_forever()
 
 
 # =========================
@@ -420,6 +444,8 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 def main():
 
     init_db()
+
+    threading.Thread(target=run_keepalive_server, daemon=True).start()
 
     app = Application.builder().token(TOKEN).build()
 
