@@ -2,13 +2,12 @@ import os
 import sqlite3
 import threading
 from dotenv import load_dotenv
-from telegram import Update, ReplyKeyboardMarkup
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application,
     CommandHandler,
-    MessageHandler,
+    CallbackQueryHandler,
     ContextTypes,
-    filters,
 )
 
 load_dotenv()
@@ -24,10 +23,6 @@ DB_FILE = "bot.db"
 # =========================
 # KEEP-ALIVE SERVER (for Render free Web Service)
 # =========================
-# Render's free plan only works for services that listen on a port.
-# This tiny server exists only to satisfy that requirement so the
-# bot (which itself uses polling, not a web server) can run for free.
-
 def run_keepalive_server():
     from http.server import BaseHTTPRequestHandler, HTTPServer
 
@@ -47,7 +42,6 @@ def run_keepalive_server():
 # =========================
 # DATABASE
 # =========================
-
 def init_db():
     conn = sqlite3.connect(DB_FILE)
     cur = conn.cursor()
@@ -84,7 +78,6 @@ def add_user(user_id, username):
             (user_id, username)
             VALUES (?, ?)
         """, (user_id, username))
-
     else:
         cur.execute("""
             UPDATE users
@@ -109,340 +102,210 @@ def get_user(user_id):
     """, (user_id,))
 
     result = cur.fetchone()
-
     conn.close()
-
     return result
 
 
 # =========================
-# MAIN MENU
+# KEYBOARDS (INLINE)
 # =========================
+def get_main_keyboard():
+    keyboard = [
+        [InlineKeyboardButton("🎯 Tasks / Ads", callback_data="menu_tasks")],
+        [InlineKeyboardButton("👥 Refer & Earn", callback_data="menu_referral")],
+        [InlineKeyboardButton("💰 My Balance", callback_data="menu_balance")],
+        [InlineKeyboardButton("📊 My Stats", callback_data="action_stats")]
+    ]
+    return InlineKeyboardMarkup(keyboard)
 
-MAIN_MENU = [
-    ["🎯 Tasks / Ads"],
-    ["👥 Refer & Earn"],
-    ["💰 My Balance"],
-    ["📊 My Stats"]
-]
 
-
+# =========================
+# START COMMAND
+# =========================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
     user = update.effective_user
-
-    add_user(
-        user.id,
-        user.username or ""
-    )
-
-    keyboard = ReplyKeyboardMarkup(
-        MAIN_MENU,
-        resize_keyboard=True
-    )
+    add_user(user.id, user.username or "")
 
     await update.message.reply_text(
         "👋 Welcome to Forex Adil Bot!\n\n"
-        "Yahan aap tasks complete karke rewards earn "
-        "kar sakte hain.\n\n"
+        "Yahan aap tasks complete karke rewards earn kar sakte hain.\n\n"
         "Neeche menu se option select karein.",
-        reply_markup=keyboard
+        reply_markup=get_main_keyboard()
     )
 
 
 # =========================
-# TASKS / ADS
+# CALLBACK HANDLER (INLINE BUTTONS)
 # =========================
-
-async def tasks_menu(update, context):
-
-    keyboard = [
-        ["📢 Available Ads"],
-        ["✅ Complete Task"],
-        ["📋 My Completed Tasks"],
-        ["🔙 Back"]
-    ]
-
-    await update.message.reply_text(
-        "🎯 Tasks / Ads\n\n"
-        "Available tasks yahan show honge.",
-        reply_markup=ReplyKeyboardMarkup(
-            keyboard,
-            resize_keyboard=True
-        )
-    )
-
-
-async def available_ads(update, context):
-
-    await update.message.reply_text(
-        "📢 Available Ads\n\n"
-        "There are currently no ads available.\n\n"
-        "New ads will appear here when they are added."
-    )
-
-
-async def complete_task(update, context):
-
-    await update.message.reply_text(
-        "✅ Complete Task\n\n"
-        "There is currently no task available."
-    )
-
-
-async def completed_tasks(update, context):
-
-    data = get_user(update.effective_user.id)
-
-    completed = data[5] if data else 0
-
-    await update.message.reply_text(
-        f"📋 My Completed Tasks\n\n"
-        f"Tasks Completed: {completed}"
-    )
-
-
-# =========================
-# REFERRAL
-# =========================
-
-async def referral_menu(update, context):
-
-    keyboard = [
-        ["🔗 Referral Link"],
-        ["👥 My Referrals"],
-        ["💵 Referral Earnings"],
-        ["🔙 Back"]
-    ]
-
-    await update.message.reply_text(
-        "👥 Refer & Earn",
-        reply_markup=ReplyKeyboardMarkup(
-            keyboard,
-            resize_keyboard=True
-        )
-    )
-
-
-async def referral_link(update, context):
-
-    bot_username = context.bot.username
-
-    link = (
-        f"https://t.me/{bot_username}"
-        f"?start={update.effective_user.id}"
-    )
-
-    await update.message.reply_text(
-        "🔗 Your Referral Link\n\n"
-        f"{link}\n\n"
-        "Share this link with your friends."
-    )
-
-
-async def my_referrals(update, context):
-
-    data = get_user(update.effective_user.id)
-
-    referrals = data[2] if data else 0
-
-    await update.message.reply_text(
-        f"👥 My Referrals\n\n"
-        f"Total Referrals: {referrals}"
-    )
-
-
-async def referral_earnings(update, context):
-
-    data = get_user(update.effective_user.id)
-
-    earnings = data[3] if data else 0
-
-    await update.message.reply_text(
-        f"💵 Referral Earnings\n\n"
-        f"${earnings:.2f}"
-    )
-
-
-# =========================
-# BALANCE
-# =========================
-
-async def balance_menu(update, context):
-
-    keyboard = [
-        ["💰 Total Earnings"],
-        ["⏳ Pending"],
-        ["💵 Available Balance"],
-        ["💸 Withdraw"],
-        ["📜 Withdrawal History"],
-        ["🔙 Back"]
-    ]
-
-    await update.message.reply_text(
-        "💰 My Balance",
-        reply_markup=ReplyKeyboardMarkup(
-            keyboard,
-            resize_keyboard=True
-        )
-    )
-
-
-async def total_earnings(update, context):
-
-    data = get_user(update.effective_user.id)
-
-    balance = data[0] if data else 0
-
-    await update.message.reply_text(
-        f"💰 Total Earnings\n\n"
-        f"${balance:.2f}"
-    )
-
-
-async def pending(update, context):
-
-    data = get_user(update.effective_user.id)
-
-    amount = data[1] if data else 0
-
-    await update.message.reply_text(
-        f"⏳ Pending\n\n"
-        f"${amount:.2f}"
-    )
-
-
-async def available_balance(update, context):
-
-    data = get_user(update.effective_user.id)
-
-    amount = data[0] if data else 0
-
-    await update.message.reply_text(
-        f"💵 Available Balance\n\n"
-        f"${amount:.2f}"
-    )
-
-
-async def withdraw(update, context):
-
-    await update.message.reply_text(
-        "💸 Withdraw\n\n"
-        "Withdrawal system will be available soon."
-    )
-
-
-async def withdrawal_history(update, context):
-
-    await update.message.reply_text(
-        "📜 Withdrawal History\n\n"
-        "No withdrawals yet."
-    )
-
-
-# =========================
-# STATS
-# =========================
-
-async def stats(update, context):
-
-    data = get_user(update.effective_user.id)
-
-    if data:
-        balance, pending_amount, referrals, referral_earnings, ads, tasks = data
-    else:
-        balance = 0
-        referrals = 0
-        ads = 0
-        tasks = 0
-
-    await update.message.reply_text(
-        "📊 My Stats\n\n"
-        f"Ads Viewed: {ads}\n"
-        f"Tasks Completed: {tasks}\n"
-        f"Referrals: {referrals}\n"
-        f"Earnings: ${balance:.2f}"
-    )
-
-
-# =========================
-# MESSAGE HANDLER
-# =========================
-
-async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
-    text = update.message.text
-
-    if text == "🎯 Tasks / Ads":
-        await tasks_menu(update, context)
-
-    elif text == "📢 Available Ads":
-        await available_ads(update, context)
-
-    elif text == "✅ Complete Task":
-        await complete_task(update, context)
-
-    elif text == "📋 My Completed Tasks":
-        await completed_tasks(update, context)
-
-    elif text == "👥 Refer & Earn":
-        await referral_menu(update, context)
-
-    elif text == "🔗 Referral Link":
-        await referral_link(update, context)
-
-    elif text == "👥 My Referrals":
-        await my_referrals(update, context)
-
-    elif text == "💵 Referral Earnings":
-        await referral_earnings(update, context)
-
-    elif text == "💰 My Balance":
-        await balance_menu(update, context)
-
-    elif text == "💰 Total Earnings":
-        await total_earnings(update, context)
-
-    elif text == "⏳ Pending":
-        await pending(update, context)
-
-    elif text == "💵 Available Balance":
-        await available_balance(update, context)
-
-    elif text == "💸 Withdraw":
-        await withdraw(update, context)
-
-    elif text == "📜 Withdrawal History":
-        await withdrawal_history(update, context)
-
-    elif text == "📊 My Stats":
-        await stats(update, context)
-
-    elif text == "🔙 Back":
-
-        keyboard = ReplyKeyboardMarkup(
-            MAIN_MENU,
-            resize_keyboard=True
+async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+
+    user_id = query.from_user.id
+    data = query.data
+
+    # --- MAIN MENU NAVIGATION ---
+    if data == "main_menu":
+        await query.edit_message_text(
+            "🏠 Main Menu\n\nNeeche menu se option select karein.",
+            reply_markup=get_main_keyboard()
         )
 
-        await update.message.reply_text(
-            "🏠 Main Menu",
-            reply_markup=keyboard
+    # --- TASKS / ADS MENU ---
+    elif data == "menu_tasks":
+        keyboard = [
+            [InlineKeyboardButton("📢 Available Ads", callback_data="task_ads")],
+            [InlineKeyboardButton("✅ Complete Task", callback_data="task_complete")],
+            [InlineKeyboardButton("📋 My Completed Tasks", callback_data="task_my_completed")],
+            [InlineKeyboardButton("🔙 Back", callback_data="main_menu")]
+        ]
+        await query.edit_message_text(
+            "🎯 Tasks / Ads\n\nAvailable tasks yahan show honge.",
+            reply_markup=InlineKeyboardMarkup(keyboard)
         )
 
-    else:
+    elif data == "task_ads":
+        keyboard = [[InlineKeyboardButton("🔙 Back", callback_data="menu_tasks")]]
+        await query.edit_message_text(
+            "📢 Available Ads\n\nThere are currently no ads available.\n\nNew ads will appear here when they are added.",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
 
-        await update.message.reply_text(
-            "Please menu se koi option select karein."
+    elif data == "task_complete":
+        keyboard = [[InlineKeyboardButton("🔙 Back", callback_data="menu_tasks")]]
+        await query.edit_message_text(
+            "✅ Complete Task\n\nThere is currently no task available.",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+
+    elif data == "task_my_completed":
+        user_data = get_user(user_id)
+        completed = user_data[5] if user_data else 0
+        keyboard = [[InlineKeyboardButton("🔙 Back", callback_data="menu_tasks")]]
+        await query.edit_message_text(
+            f"📋 My Completed Tasks\n\nTasks Completed: {completed}",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+
+    # --- REFERRAL MENU ---
+    elif data == "menu_referral":
+        keyboard = [
+            [InlineKeyboardButton("🔗 Referral Link", callback_data="ref_link")],
+            [InlineKeyboardButton("👥 My Referrals", callback_data="ref_count")],
+            [InlineKeyboardButton("💵 Referral Earnings", callback_data="ref_earnings")],
+            [InlineKeyboardButton("🔙 Back", callback_data="main_menu")]
+        ]
+        await query.edit_message_text(
+            "👥 Refer & Earn",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+
+    elif data == "ref_link":
+        bot_username = context.bot.username
+        link = f"https://t.me/{bot_username}?start={user_id}"
+        keyboard = [[InlineKeyboardButton("🔙 Back", callback_data="menu_referral")]]
+        await query.edit_message_text(
+            f"🔗 Your Referral Link\n\n{link}\n\nShare this link with your friends.",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+
+    elif data == "ref_count":
+        user_data = get_user(user_id)
+        referrals = user_data[2] if user_data else 0
+        keyboard = [[InlineKeyboardButton("🔙 Back", callback_data="menu_referral")]]
+        await query.edit_message_text(
+            f"👥 My Referrals\n\nTotal Referrals: {referrals}",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+
+    elif data == "ref_earnings":
+        user_data = get_user(user_id)
+        earnings = user_data[3] if user_data else 0
+        keyboard = [[InlineKeyboardButton("🔙 Back", callback_data="menu_referral")]]
+        await query.edit_message_text(
+            f"💵 Referral Earnings\n\n${earnings:.2f}",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+
+    # --- BALANCE MENU ---
+    elif data == "menu_balance":
+        keyboard = [
+            [InlineKeyboardButton("💰 Total Earnings", callback_data="bal_total")],
+            [InlineKeyboardButton("⏳ Pending", callback_data="bal_pending")],
+            [InlineKeyboardButton("💵 Available Balance", callback_data="bal_available")],
+            [InlineKeyboardButton("💸 Withdraw", callback_data="bal_withdraw")],
+            [InlineKeyboardButton("📜 Withdrawal History", callback_data="bal_history")],
+            [InlineKeyboardButton("🔙 Back", callback_data="main_menu")]
+        ]
+        await query.edit_message_text(
+            "💰 My Balance",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+
+    elif data == "bal_total":
+        user_data = get_user(user_id)
+        balance = user_data[0] if user_data else 0
+        keyboard = [[InlineKeyboardButton("🔙 Back", callback_data="menu_balance")]]
+        await query.edit_message_text(
+            f"💰 Total Earnings\n\n${balance:.2f}",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+
+    elif data == "bal_pending":
+        user_data = get_user(user_id)
+        amount = user_data[1] if user_data else 0
+        keyboard = [[InlineKeyboardButton("🔙 Back", callback_data="menu_balance")]]
+        await query.edit_message_text(
+            f"⏳ Pending\n\n${amount:.2f}",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+
+    elif data == "bal_available":
+        user_data = get_user(user_id)
+        amount = user_data[0] if user_data else 0
+        keyboard = [[InlineKeyboardButton("🔙 Back", callback_data="menu_balance")]]
+        await query.edit_message_text(
+            f"💵 Available Balance\n\n${amount:.2f}",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+
+    elif data == "bal_withdraw":
+        keyboard = [[InlineKeyboardButton("🔙 Back", callback_data="menu_balance")]]
+        await query.edit_message_text(
+            "💸 Withdraw\n\nWithdrawal system will be available soon.",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+
+    elif data == "bal_history":
+        keyboard = [[InlineKeyboardButton("🔙 Back", callback_data="menu_balance")]]
+        await query.edit_message_text(
+            "📜 Withdrawal History\n\nNo withdrawals yet.",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+
+    # --- STATS ACTION ---
+    elif data == "action_stats":
+        user_data = get_user(user_id)
+        if user_data:
+            balance, pending_amount, referrals, referral_earnings, ads, tasks = user_data
+        else:
+            balance = referrals = ads = tasks = 0
+
+        keyboard = [[InlineKeyboardButton("🔙 Back", callback_data="main_menu")]]
+        await query.edit_message_text(
+            f"📊 My Stats\n\n"
+            f"Ads Viewed: {ads}\n"
+            f"Tasks Completed: {tasks}\n"
+            f"Referrals: {referrals}\n"
+            f"Earnings: ${balance:.2f}",
+            reply_markup=InlineKeyboardMarkup(keyboard)
         )
 
 
 # =========================
 # RUN BOT
 # =========================
-
 def main():
-
     init_db()
 
     threading.Thread(target=run_keepalive_server, daemon=True).start()
@@ -450,13 +313,7 @@ def main():
     app = Application.builder().token(TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
-
-    app.add_handler(
-        MessageHandler(
-            filters.TEXT & ~filters.COMMAND,
-            message_handler
-        )
-    )
+    app.add_handler(CallbackQueryHandler(button_handler))
 
     print("Bot is running...")
 
